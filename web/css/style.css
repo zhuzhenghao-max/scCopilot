@@ -1,0 +1,403 @@
+/* scCopilot 静态站视觉层 · 深色生物荧光版
+ *
+ * 与 app/style.css 同源的设计令牌，但选择器只命中本站自己的 DOM——
+ * Streamlit 那套 [data-testid] 在这里不存在，照搬会全部落空。
+ * 背景 3D 细胞场景在 #cell-bg（js/cells-bg.js），内容层一律半透明玻璃卡片，
+ * 让背景透出来但不伤文字对比度。
+ */
+
+:root {
+    --sc-primary: #3b82f6;
+    --sc-primary-dark: #60a5fa;
+    --sc-primary-soft: rgba(59, 130, 246, .16);
+    --sc-cyan: #22d3ee;
+    --sc-bg: #04070f;
+    --sc-surface: rgba(13, 22, 40, .78);
+    --sc-surface-solid: #101a30;
+    --sc-border: rgba(126, 160, 255, .16);
+    --sc-text: #e7eefb;
+    --sc-muted: #93a5c6;
+    --sc-ok: #4ade80;
+    --sc-warn: #fbbf24;
+    --sc-bad: #fb7185;
+    --sc-radius: 14px;
+    --sc-shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 26px -14px rgba(0, 0, 0, .6);
+    --sc-shadow-lg: 0 2px 4px rgba(0, 0, 0, .3), 0 20px 44px -20px rgba(30, 80, 180, .45);
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    background:
+        radial-gradient(1100px 700px at 85% -10%, rgba(99, 102, 241, .16) 0%, rgba(99, 102, 241, 0) 60%),
+        radial-gradient(1000px 640px at 8% 12%, rgba(34, 211, 238, .10) 0%, rgba(34, 211, 238, 0) 55%),
+        radial-gradient(900px 900px at 50% 110%, rgba(124, 58, 237, .12) 0%, rgba(124, 58, 237, 0) 60%),
+        var(--sc-bg);
+    background-attachment: fixed;
+    color: var(--sc-text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    font-feature-settings: "tnum" 1;
+    line-height: 1.5;
+}
+
+#cell-bg {
+    position: fixed; inset: 0; width: 100vw; height: 100vh;
+    z-index: 0; pointer-events: none; display: block;
+}
+
+/* ------------------------------------------------------------ 背景装饰四层
+ * 从后往前：#sc-aurora 极光辉光 → #sc-grid 荧光网格 → #cell-bg 3D 细胞场景
+ * → #sc-grain 颗粒噪声。全部 pointer-events:none、z-index:0，
+ * 不承载任何数据，也不参与计算；内容层在 .wrap（z-index:1）之上。
+ * WebGL 不可用时 3D 层缺席，这三层 CSS 仍让画面有内容。 */
+#sc-aurora, #sc-grid, #sc-grain {
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+}
+
+/* 极光：三团缓慢漂移的辉光，把纯深蓝压出层次。透明度刻意压低，不抢正文对比度。 */
+#sc-aurora {
+    background:
+        radial-gradient(42vw 30vw at 18% 22%, rgba(56, 189, 248, .16) 0%, rgba(56, 189, 248, 0) 68%),
+        radial-gradient(38vw 34vw at 78% 12%, rgba(167, 139, 250, .15) 0%, rgba(167, 139, 250, 0) 66%),
+        radial-gradient(46vw 32vw at 62% 88%, rgba(45, 212, 191, .12) 0%, rgba(45, 212, 191, 0) 70%),
+        radial-gradient(30vw 26vw at 6% 72%, rgba(244, 114, 182, .10) 0%, rgba(244, 114, 182, 0) 68%);
+    animation: sc-aurora 54s ease-in-out infinite alternate;
+    will-change: transform, opacity;
+}
+
+@keyframes sc-aurora {
+    from { transform: translate3d(-2.5%, 1.5%, 0) scale(1.06); opacity: .78; }
+    50%  { opacity: 1; }
+    to   { transform: translate3d(3%, -2%, 0) scale(1.14); opacity: .84; }
+}
+
+/* 荧光网格：细 34px + 粗 170px 两层线，四周用 mask 淡出，避免看到硬边界。
+   漂移用 transform（合成层，不触发整屏重绘）——之前动 background-position
+   是每帧全视口 repaint，叠加 Plotly 后截图都能超时。元素放大到 120% 才不会露边。 */
+#sc-grid {
+    inset: -14%;
+    background-image:
+        linear-gradient(to right, rgba(125, 211, 252, .075) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(125, 211, 252, .075) 1px, transparent 1px),
+        linear-gradient(to right, rgba(129, 140, 248, .10) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(129, 140, 248, .10) 1px, transparent 1px);
+    background-size: 34px 34px, 34px 34px, 170px 170px, 170px 170px;
+    -webkit-mask-image: radial-gradient(105% 90% at 50% 36%, #000 0%, rgba(0, 0, 0, .55) 46%, transparent 78%);
+    mask-image: radial-gradient(105% 90% at 50% 36%, #000 0%, rgba(0, 0, 0, .55) 46%, transparent 78%);
+    animation: sc-grid 90s linear infinite;
+    will-change: transform;
+}
+
+@keyframes sc-grid {
+    from { transform: translate3d(0, 0, 0); }
+    to   { transform: translate3d(-170px, -170px, 0); }
+}
+
+/* 颗粒噪声：压掉大面积渐变的 banding，顺手给出"胶片感"。3.5% 不改变可读性。 */
+#sc-grain {
+    opacity: .035;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.wrap { position: relative; z-index: 1; max-width: 1680px; margin: 0 auto; padding: 1.6rem 1.5rem 3.5rem; }
+
+/* ---------------------------------------------------------------- 首屏 hero */
+.hero { position: relative; padding: 3.2rem 0 1.6rem; max-width: 980px; }
+
+/* 3D 背景在文字区压一层很淡的暗角，保证正文对比度；边缘仍能看到细胞和游动的藻 */
+.hero::before {
+    content: ''; position: absolute; z-index: -1; pointer-events: none;
+    inset: -1.6rem -14% -2.4rem -12%;
+    background: radial-gradient(58% 82% at 26% 46%, rgba(4, 7, 15, .78) 0%, rgba(4, 7, 15, .38) 55%, rgba(4, 7, 15, 0) 78%);
+}
+
+.hero-title {
+    font-size: clamp(1.9rem, 4.2vw, 3.3rem); font-weight: 800;
+    letter-spacing: -.02em; line-height: 1.22; margin: 0;
+    background: linear-gradient(100deg, #7dd3fc 0%, #a5b4fc 48%, #d8b4fe 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    text-shadow: 0 0 44px rgba(96, 165, 250, .18);
+}
+
+.hero-sub {
+    color: var(--sc-muted); font-size: .98rem; line-height: 1.75;
+    margin: .9rem 0 0; max-width: 46rem;
+}
+
+.hero-actions { display: flex; flex-wrap: wrap; gap: .9rem; margin-top: 1.7rem; }
+
+.hero-btn {
+    display: flex; flex-direction: column; align-items: flex-start; gap: .3rem;
+    min-width: 240px; padding: .95rem 1.35rem; border-radius: 16px; cursor: pointer;
+    font-family: inherit; font-size: 1.06rem; font-weight: 750; letter-spacing: .01em;
+    transition: transform .2s ease, box-shadow .25s ease, border-color .2s ease, background .25s ease;
+}
+.hero-btn span { font-size: .74rem; font-weight: 500; opacity: .82; }
+.hero-btn--primary {
+    border: 1px solid rgba(125, 211, 252, .4); color: #f0f9ff;
+    background: linear-gradient(135deg, rgba(14, 165, 233, .85) 0%, rgba(99, 102, 241, .85) 100%);
+    box-shadow: 0 12px 36px -12px rgba(56, 130, 246, .75), inset 0 1px 0 rgba(255, 255, 255, .18);
+}
+.hero-btn--primary:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 20px 46px -12px rgba(56, 190, 246, .85), inset 0 1px 0 rgba(255, 255, 255, .25);
+}
+.hero-btn--ghost {
+    border: 1px solid rgba(126, 160, 255, .35); color: #dbeafe;
+    background: rgba(17, 27, 48, .55); backdrop-filter: blur(10px);
+}
+.hero-btn--ghost:hover {
+    transform: translateY(-3px); border-color: rgba(125, 211, 252, .65);
+    box-shadow: 0 16px 40px -16px rgba(56, 130, 246, .6);
+    background: rgba(23, 36, 64, .7);
+}
+
+.hero-upload-note {
+    margin-top: 1rem; max-width: 44rem;
+    border: 1px solid var(--sc-border); border-left: 3px solid var(--sc-cyan);
+    border-radius: 0 12px 12px 0; background: rgba(13, 22, 40, .85);
+    backdrop-filter: blur(10px); padding: .8rem 1rem;
+    font-size: .84rem; line-height: 1.7; color: #bcd3f7;
+}
+.hero-upload-note p { margin: .3rem 0; }
+.hero-upload-note code { color: #7dd3fc; }
+
+.hero-scenarios { margin: 1.6rem 0 .4rem; }
+
+#entry-hint {
+    /* 这行是"下一步做什么"的指引，压在发光的 3D 场景上会被吃掉，所以给它一块自己的底。 */
+    display: inline-block; margin-top: 1.1rem; padding: .34rem .6rem;
+    border-radius: 9px; background: rgba(4, 7, 15, .72);
+    border: 1px solid rgba(126, 160, 255, .14); backdrop-filter: blur(3px);
+}
+
+/* 首屏只有 hero：结果区和「分析场景」选择器默认隐藏，点「内置演示数据」才展开。
+   开关是 body 上的 .sc-gated（app.js 加、reveal() 去），不是 HTML 的 hidden 属性——
+   静态站没有构建号，浏览器可能拿缓存里的旧 app.js；旧脚本不认识 hidden，
+   症状就是"点了没反应"。用 class 的话最坏只退回"直接显示"，不会卡死。
+   .rise 的 .9s 入场延迟会让"点了之后先空一下"，所以 picker 的延迟归零。 */
+body.sc-gated #demo-zone, body.sc-gated #scenario-picker { display: none; }
+body:not(.sc-gated) #entry-hint { display: none; }
+#scenario-picker { animation-delay: 0s; }
+body:not(.sc-gated) #demo-zone { animation: sc-fade .55s cubic-bezier(.18, .7, .2, 1) both; }
+
+@keyframes sc-fade {
+    from { opacity: 0; transform: translateY(18px); }
+    to   { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body:not(.sc-gated) #demo-zone { animation: none; }
+    #sc-aurora, #sc-grid { animation: none; }
+    #sc-aurora { opacity: .9; transform: none; }
+}
+
+/* 入场：从下往上浮现，颜色与透明度一起长出来。
+   动画放在 .rise 包装层上，按钮自身的 hover transform 不会被 fill-forwards 锁死。 */
+.rise { opacity: 0; animation: sc-rise .95s cubic-bezier(.18, .7, .2, 1) var(--d, 0s) both; }
+
+@keyframes sc-rise {
+    from { opacity: 0; transform: translateY(36px); filter: saturate(0) brightness(.6); }
+    60%  { opacity: 1; }
+    to   { opacity: 1; transform: translateY(0); filter: saturate(1) brightness(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .rise { animation: none; opacity: 1; }
+}
+
+/* ---------------------------------------------------------------- 卡片 */
+.sc-card {
+    background: var(--sc-surface);
+    border: 1px solid var(--sc-border);
+    border-radius: var(--sc-radius);
+    box-shadow: var(--sc-shadow);
+    backdrop-filter: blur(12px);
+    padding: 1rem 1.15rem 1.05rem;
+    margin-bottom: 1rem;
+}
+
+.sc-eyebrow {
+    font-size: .7rem; font-weight: 700; letter-spacing: .13em;
+    text-transform: uppercase; color: var(--sc-cyan); margin: 0 0 .35rem;
+}
+
+.sc-title { font-size: 1.62rem; font-weight: 780; letter-spacing: -.02em; line-height: 1.2; margin: 0; }
+.sc-sub { color: var(--sc-muted); font-size: .87rem; line-height: 1.6; margin: .4rem 0 0; }
+
+.sc-section-title {
+    display: flex; align-items: center; gap: .5rem;
+    font-size: .95rem; font-weight: 700; margin: 0 0 .7rem;
+}
+
+.sc-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--sc-cyan), var(--sc-primary));
+    box-shadow: 0 0 0 3px var(--sc-primary-soft); flex: none;
+}
+
+/* ---------------------------------------------------------------- 布局 */
+.grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 1rem; align-items: start; }
+
+/* ---------------------------------------------------------------- 指标条 */
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: .7rem; margin-bottom: 1rem; }
+
+.metric {
+    background: var(--sc-surface); border: 1px solid var(--sc-border);
+    border-radius: 12px; box-shadow: var(--sc-shadow); backdrop-filter: blur(12px);
+    padding: .72rem .9rem;
+}
+.metric-label { font-size: .74rem; font-weight: 600; color: var(--sc-muted); }
+.metric-value { font-size: 1.35rem; font-weight: 750; letter-spacing: -.015em; margin-top: 2px; color: #f1f6ff; }
+.metric-delta { font-size: .72rem; color: var(--sc-bad); margin-left: .35rem; font-weight: 600; }
+
+/* ---------------------------------------------------------------- 控件 */
+.controls { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: 1rem; }
+
+button.sc-btn {
+    border-radius: 10px; font-weight: 640; padding: .5rem .95rem; cursor: pointer;
+    border: 1px solid var(--sc-border); background: rgba(17, 27, 48, .8); color: #d5e2f8;
+    font-size: .84rem; font-family: inherit;
+    transition: box-shadow .18s ease, transform .18s ease, border-color .18s ease, background .18s ease;
+}
+button.sc-btn:hover { border-color: #3b82f6; box-shadow: 0 6px 18px -10px rgba(59, 130, 246, .6); transform: translateY(-1px); }
+button.sc-btn[aria-pressed="true"] {
+    background: linear-gradient(135deg, #0ea5e9, #3b82f6);
+    border-color: transparent; color: #fff;
+    box-shadow: 0 8px 22px -10px rgba(59, 130, 246, .8);
+}
+button.sc-btn--primary { background: var(--sc-primary); border-color: transparent; color: #fff; box-shadow: 0 10px 24px -14px rgba(59, 130, 246, .85); }
+button.sc-btn--primary:hover { background: #2563eb; }
+/* 动作按钮，不是着色开关：靠右、虚线边、弱色，避免被误读成第四个着色选项 */
+button.sc-btn--quiet { margin-left: auto; border-style: dashed; color: var(--sc-muted); font-weight: 560; }
+button.sc-btn--quiet:hover { color: var(--sc-text); }
+
+.control-label { font-size: .78rem; font-weight: 650; color: #b9c9e8; margin-right: .2rem; }
+
+/* ---------------------------------------------------------------- AI 面板 */
+.sc-ai {
+    position: relative;
+    background: linear-gradient(180deg, rgba(23, 36, 64, .88) 0%, var(--sc-surface) 42%);
+    border: 1px solid rgba(126, 160, 255, .24); border-radius: 16px;
+    box-shadow: var(--sc-shadow-lg); backdrop-filter: blur(12px);
+    padding: 1rem 1.1rem 1.05rem; overflow: hidden;
+}
+.sc-ai::before {
+    content: ""; position: absolute; inset: 0 0 auto 0; height: 3px;
+    background: linear-gradient(90deg, #22d3ee 0%, #3b82f6 45%, #a78bfa 100%);
+}
+.sc-ai-head { display: flex; align-items: center; gap: .55rem; margin-bottom: .8rem; }
+.sc-avatar {
+    width: 34px; height: 34px; border-radius: 10px; flex: none; display: grid; place-items: center;
+    background: linear-gradient(135deg, var(--sc-primary) 0%, #6366f1 100%);
+    color: #fff; font-size: .82rem; font-weight: 800; box-shadow: 0 6px 16px -6px rgba(59, 130, 246, .65);
+}
+.sc-ai-name { font-size: .95rem; font-weight: 720; line-height: 1.15; }
+.sc-ai-meta { font-size: .72rem; color: var(--sc-muted); margin-top: 2px; }
+
+.sc-type { font-size: 1.34rem; font-weight: 780; letter-spacing: -.02em; line-height: 1.28; margin: .1rem 0 .55rem; color: #dbeafe; }
+.sc-type--refuse { color: var(--sc-bad); }
+.sc-reason { font-size: .87rem; line-height: 1.72; color: #d5e2f8; white-space: pre-wrap; word-break: break-word; }
+
+/* ---------------------------------------------------------------- 徽章 */
+.sc-chip {
+    display: inline-block; padding: .17rem .55rem; margin: 0 .3rem .35rem 0; border-radius: 999px;
+    font-size: .74rem; font-weight: 620; border: 1px solid var(--sc-border);
+    background: rgba(148, 178, 255, .08); color: #c6d5f2; white-space: nowrap;
+}
+.sc-chip--gene { font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.sc-chip--blue { background: var(--sc-primary-soft); border-color: rgba(96, 165, 250, .4); color: #93c5fd; }
+.sc-chip--ghost { background: transparent; }
+
+.sc-badge {
+    display: inline-flex; align-items: center; gap: .35rem; padding: .22rem .6rem;
+    border-radius: 8px; font-size: .74rem; font-weight: 700; margin: 0 .3rem .35rem 0;
+}
+.sc-badge--high { background: rgba(74, 222, 128, .16); color: #4ade80; }
+.sc-badge--mid  { background: rgba(251, 191, 36, .14); color: #fbbf24; }
+.sc-badge--low  { background: rgba(251, 113, 133, .14); color: #fb7185; }
+.sc-badge--none { background: rgba(148, 163, 184, .14); color: #94a3b8; }
+
+.sc-note {
+    border-left: 3px solid var(--sc-warn); background: rgba(251, 191, 36, .07);
+    padding: .55rem .75rem; border-radius: 0 10px 10px 0;
+    font-size: .82rem; line-height: 1.6; color: #e7cd9c; margin: .55rem 0;
+}
+.sc-note--bad { border-left-color: var(--sc-bad); background: rgba(251, 113, 133, .08); color: #f3b3c0; }
+.sc-note--info { border-left-color: var(--sc-primary); background: rgba(59, 130, 246, .09); color: #bcd3f7; }
+
+/* escalate 醒目警告 */
+.sc-alert {
+    display: flex; gap: .7rem; align-items: flex-start;
+    background: rgba(190, 18, 60, .16); border: 1px solid rgba(255, 120, 140, .3);
+    border-left: 4px solid var(--sc-bad);
+    border-radius: 12px; padding: .85rem 1rem; margin-bottom: 1rem;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 10px 26px -18px rgba(190, 18, 60, .5);
+}
+.sc-alert-icon { font-size: 1.15rem; line-height: 1.2; }
+.sc-alert-title { font-weight: 750; color: #fda4af; font-size: .95rem; margin-bottom: .3rem; }
+.sc-alert-body { font-size: .84rem; color: #f4c2cc; line-height: 1.65; }
+
+/* ---------------------------------------------------------------- Agent 时间线 */
+.sc-timeline {
+    display: flex; flex-direction: column; gap: .6rem; margin: .8rem 0; padding: .75rem;
+    background: rgba(10, 17, 32, .6); border: 1px solid var(--sc-border); border-radius: 12px;
+}
+.sc-timeline-step { display: flex; align-items: flex-start; gap: .6rem; position: relative; }
+.sc-timeline-step:not(:last-child)::after {
+    content: ""; position: absolute; left: 15px; top: 34px; bottom: -.6rem; width: 2px;
+    background: linear-gradient(180deg, var(--sc-primary) 0%, var(--sc-cyan) 100%); opacity: .35;
+}
+.sc-timeline-dot {
+    width: 32px; height: 32px; border-radius: 50%; flex: none; display: grid; place-items: center;
+    background: linear-gradient(135deg, var(--sc-primary) 0%, var(--sc-cyan) 100%);
+    font-size: .9rem; box-shadow: 0 2px 8px -2px rgba(59, 130, 246, .4);
+}
+.sc-timeline-content {
+    flex: 1; min-width: 0; background: rgba(17, 27, 48, .85);
+    border: 1px solid var(--sc-border); border-radius: 10px; padding: .5rem .7rem;
+}
+.sc-timeline-title { font-size: .85rem; font-weight: 600; color: var(--sc-text); line-height: 1.4; }
+.sc-timeline-detail { font-size: .75rem; color: var(--sc-muted); margin-top: 2px; line-height: 1.5; word-break: break-word; }
+
+/* ---------------------------------------------------------------- 表格 */
+table.sc-table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+table.sc-table th, table.sc-table td { padding: .42rem .5rem; text-align: left; border-bottom: 1px solid var(--sc-border); }
+table.sc-table th { font-weight: 650; color: #b9c9e8; background: rgba(20, 32, 56, .95); position: sticky; top: 0; }
+table.sc-table tr:hover td { background: rgba(59, 130, 246, .06); }
+.sc-table-scroll { max-height: 320px; overflow: auto; border: 1px solid var(--sc-border); border-radius: 12px; }
+
+.sc-bar { height: 6px; border-radius: 999px; background: var(--sc-primary); display: inline-block; vertical-align: middle; }
+
+code { color: #9ec5ff; }
+
+/* ---------------------------------------------------------------- 其它 */
+details.sc-exp {
+    border: 1px solid var(--sc-border); border-radius: 12px; background: var(--sc-surface);
+    box-shadow: var(--sc-shadow); backdrop-filter: blur(12px);
+    padding: .55rem .8rem; margin-bottom: .7rem;
+}
+details.sc-exp > summary { font-size: .84rem; font-weight: 650; color: #b9c9e8; cursor: pointer; }
+details.sc-exp[open] > summary { margin-bottom: .6rem; }
+
+.sc-kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: .5rem; margin: .35rem 0 .1rem; }
+.sc-kv > div { background: rgba(17, 27, 48, .7); border: 1px solid var(--sc-border); border-radius: 10px; padding: .48rem .6rem; }
+.sc-kv dt { font-size: .7rem; color: var(--sc-muted); margin: 0 0 2px; }
+.sc-kv dd { font-size: .84rem; font-weight: 680; margin: 0; color: #dbe6fb; }
+
+#umap { width: 100%; height: 460px; }
+#barplot { width: 100%; height: 300px; }
+
+.sc-hint { font-size: .8rem; color: var(--sc-muted); font-style: italic; }
+.sc-loading { padding: 2rem; text-align: center; color: var(--sc-muted); font-size: .85rem; }
+
+@media (max-width: 1100px) {
+    .grid { grid-template-columns: minmax(0, 1fr); }
+    .sc-type { font-size: 1.2rem; }
+    #umap { height: 380px; }
+    .hero { padding-top: 2rem; }
+    .hero-btn { min-width: 0; flex: 1 1 220px; }
+}

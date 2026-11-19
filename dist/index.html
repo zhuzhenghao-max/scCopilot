@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>scCopilot · 单细胞 AI 解读工作台</title>
+<meta name="description" content="Scanpy 负责算，多智能体负责读懂 marker 背后的细胞身份；证据不足时它会明说「证据不足，建议人工复核」，而不是编一个名字给你。">
+<link rel="stylesheet" href="css/style.css?v=20261118c">
+<script src="js/vendor/plotly.min.js" charset="utf-8"></script>
+<script src="js/vendor/three.min.js" defer></script>
+<script src="js/cells-bg.js?v=20261118c" defer></script>
+</head>
+<body>
+<!-- 背景四层，从后往前：极光辉光 → 荧光网格 → 3D 细胞场景 → 颗粒噪声。
+     都是 pointer-events:none 的装饰层，不参与任何数据展示。 -->
+<div id="sc-aurora" aria-hidden="true"></div>
+<div id="sc-grid" aria-hidden="true"></div>
+<canvas id="cell-bg" aria-hidden="true"></canvas>
+<div id="sc-grain" aria-hidden="true"></div>
+<div class="wrap">
+
+  <section class="hero" id="hero">
+    <div class="rise" style="--d:.05s"><p class="sc-eyebrow">Qoder 高校创造力大赛 · StudyHack</p></div>
+    <div class="rise" style="--d:.18s">
+      <h1 class="hero-title">从 UMAP 上的一个点，<br>走到一个有证据的生物学结论</h1>
+    </div>
+    <div class="rise" style="--d:.34s">
+      <p class="hero-sub">
+        Scanpy 负责算，多智能体（Planner → Annotator → Critic）负责读懂 marker 背后的细胞身份；
+        证据不够时它会明说「证据不足，建议人工复核」，而不是编一个名字给你。
+      </p>
+    </div>
+    <div class="hero-actions">
+      <div class="rise" style="--d:.55s">
+        <button class="hero-btn hero-btn--primary" id="btn-demo" type="button">
+          内置演示数据
+          <span>2,240 个 PBMC 细胞 · 点任意细胞看 AI 解读</span>
+        </button>
+      </div>
+      <div class="rise" style="--d:.72s">
+        <button class="hero-btn hero-btn--ghost" id="btn-upload" type="button" aria-expanded="false" aria-controls="upload-note">
+          上传 .h5ad 文件
+          <span>点击直达本机工作台，实时跑批</span>
+        </button>
+      </div>
+    </div>
+    <p class="sc-sub" id="entry-hint">
+      点「内置演示数据」展开下面的图表与 AI 解读——首屏不预加载分析数据。
+    </p>
+    <div class="hero-upload-note" id="upload-note" hidden>
+      <p>
+        没有检测到本机工作台（<code>http://localhost:8501</code>）。本站是<strong>冻结的预计算结果</strong>，
+        浏览器里不跑分析；上传 <code>.h5ad</code> 实时跑批由本地工作台完成，流水线与证据闸门和本站完全一致。
+      </p>
+      <p>在 <code>scCopilot</code> 目录执行 <code>python -m streamlit run app/main.py</code>，
+        然后再点一次这个按钮就会直接跳过去；也可以手动打开
+        <a href="http://localhost:8501" target="_blank" rel="noopener">本地工作台</a>，侧边栏选「上传 .h5ad 文件」。</p>
+      <p>无 API Key 也能全程本地规则解读。</p>
+    </div>
+    <div class="rise" style="--d:.9s" id="scenario-picker">
+      <div class="controls hero-scenarios">
+        <span class="control-label">分析场景</span>
+        <div id="scenario-buttons" role="group" aria-label="选择分析场景"></div>
+      </div>
+      <p class="sc-sub" id="scenario-blurb"></p>
+    </div>
+  </section>
+
+  <!-- 首屏只有 hero：结果区的显隐由 app.js 的 body.sc-gated 控制，
+       不写 hidden 属性——HTML 命中新缓存而 JS 还是旧版时，旧 JS 不认识这个属性，
+       页面就会"点了没反应"；放在 JS 里则最多退回"直接显示"，不会卡住。 -->
+  <main id="demo-zone">
+
+  <div class="metrics" id="metrics"></div>
+
+  <div class="grid">
+    <!-- ------------------------------------------------------------ 左栏 -->
+    <div>
+      <section class="sc-card">
+        <p class="sc-section-title"><span class="sc-dot"></span>UMAP · 点一个细胞试试</p>
+        <div class="controls">
+          <span class="control-label">着色</span>
+          <button class="sc-btn" data-color="cluster" aria-pressed="true">簇标签</button>
+          <button class="sc-btn" data-color="pct_mito" aria-pressed="false">线粒体占比</button>
+          <button class="sc-btn" data-color="n_counts" aria-pressed="false">UMI 数量</button>
+          <button class="sc-btn sc-btn--quiet" id="umap-reset" type="button" title="把视图恢复成全部细胞">重置视图</button>
+        </div>
+        <div id="umap"><p class="sc-loading">正在载入分析结果…</p></div>
+        <p class="sc-sub" id="umap-caption"></p>
+      </section>
+
+      <section class="sc-card">
+        <p class="sc-section-title"><span class="sc-dot"></span>当前簇的 Top 差异基因</p>
+        <div id="barplot"></div>
+        <p class="sc-sub" id="bar-caption"></p>
+      </section>
+
+      <section class="sc-card">
+        <p class="sc-section-title"><span class="sc-dot"></span>簇一览 · 点行也能选中</p>
+        <div class="sc-table-scroll"><table class="sc-table" id="cluster-table"></table></div>
+      </section>
+
+      <section class="sc-card" id="resolution-card" hidden>
+        <p class="sc-section-title"><span class="sc-dot"></span>调分辨率时发生了什么？</p>
+        <p class="sc-sub">拆分 / 合并的数量由前后两次聚类的真实交叉表算出，不依赖模型。</p>
+        <div id="resolution-body"></div>
+      </section>
+    </div>
+
+    <!-- ------------------------------------------------------------ 右栏 -->
+    <div>
+      <div id="escalate-slot"></div>
+
+      <section class="sc-ai" id="ai-card">
+        <div class="sc-ai-head">
+          <div class="sc-avatar">AI</div>
+          <div>
+            <div class="sc-ai-name">scCopilot · 免疫学解读</div>
+            <div class="sc-ai-meta" id="ai-meta">等待选择簇…</div>
+          </div>
+        </div>
+        <p class="sc-hint" id="ai-placeholder">在左侧 UMAP 上点一个细胞，或点簇一览表里的任意一行。</p>
+        <div id="ai-body"></div>
+      </section>
+
+      <section class="sc-card" id="trace-card" hidden>
+        <p class="sc-section-title"><span class="sc-dot"></span>Agent 思考过程</p>
+        <div class="sc-timeline" id="trace-body"></div>
+      </section>
+
+      <details class="sc-exp" id="kg-card" hidden>
+        <summary>知识图谱候选细胞类型（Cell Ontology · Jaccard 匹配）</summary>
+        <div id="kg-body"></div>
+      </details>
+
+      <details class="sc-exp" id="evidence-card" hidden>
+        <summary>证据表 · 每个数字都能从导出的 CSV 复现</summary>
+        <div class="sc-table-scroll"><table class="sc-table" id="evidence-body"></table></div>
+      </details>
+
+      <details class="sc-exp" id="het-card" hidden>
+        <summary>簇内异质性判定 · 这一簇该不该整体命名</summary>
+        <div id="het-body"></div>
+      </details>
+
+      <details class="sc-exp" id="gate-card" hidden>
+        <summary>闸门判定 · AI 凭什么说「证据不足」</summary>
+        <div id="gate-body"></div>
+      </details>
+
+      <details class="sc-exp">
+        <summary>QC 漏斗 / 耗时 / 复现方式</summary>
+        <div id="run-body"></div>
+      </details>
+    </div>
+  </div>
+
+  <footer class="sc-card">
+    <p class="sc-sub">
+      本页所有数字由 <code>scripts/export_site_data.py</code> 用固定 seed 在本机真实跑批产出
+      （scanpy 1.12 + 多智能体编排层），冻结为 <code>web/data/*.json</code>。
+      同一命令重跑，分析结果（簇、marker、检出率、异质性判定、UMAP 坐标）逐字节一致；
+      只有每步耗时与 Agent 时间戳会随机器变化——它们是审计信息，不是证据。
+      模型只能引用这些数字，不能自己发挥。
+    </p>
+  </footer>
+
+  </main>
+
+</div>
+<script src="js/app.js?v=20261118c"></script>
+</body>
+</html>

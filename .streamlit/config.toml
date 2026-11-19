@@ -1,0 +1,18 @@
+# scCopilot 的 Streamlit 主题
+#
+# 这里只放"CSS 管不到"的东西：控件的强调色。滑杆、复选框、单选按钮的圆点由 Streamlit
+# 内置组件库渲染，颜色取自主题的 primaryColor，默认是红色，和 app/style.css 的科技蓝
+# 撞色，所以在这里换成同一个蓝。版式与卡片样式仍然全部写在 style.css 里，改样式不用动本文件。
+#
+# 生效方式：重启 streamlit run（主题文件只在进程启动时读一次）。
+
+[theme]
+base = "light"
+primaryColor = "#2563eb"
+backgroundColor = "#f5f7fb"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#0f172a"
+borderColor = "#e4e9f2"
+
+[browser]
+gatherUsageStats = false

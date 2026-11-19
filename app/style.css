@@ -1,0 +1,439 @@
+/* scCopilot · 视觉层
+ *
+ * 目标：让一个学生项目看起来像商业 SaaS —— 克制的留白、柔和阴影、明确的信息层级、
+ * 科技蓝主色。注入方式见 app/main.py 的 inject_css()：整份文件被包进一个 style 标签，
+ * 用 unsafe_allow_html 交给 Streamlit 渲染。
+ * 注意：本文件里绝对不能出现成对的 style 标签字面量（包括注释里），否则注入时外层标签
+ * 会被提前闭合，剩下的 CSS 会当成正文显示到页面上（实测踩过）。
+ * Streamlit 1.40+ 的 DOM 用 data-testid 标记，比 class 名稳定，因此下面的选择器
+ * 优先命中 [data-testid]，并保留老 class 作为兜底。
+ */
+
+:root {
+    --sc-primary: #2563eb;
+    --sc-primary-dark: #1d4ed8;
+    --sc-primary-soft: #eff6ff;
+    --sc-cyan: #06b6d4;
+    --sc-bg: #f5f7fb;
+    --sc-surface: #ffffff;
+    --sc-border: #e4e9f2;
+    --sc-text: #0f172a;
+    --sc-muted: #64748b;
+    --sc-ok: #15803d;
+    --sc-warn: #b45309;
+    --sc-bad: #be123c;
+    --sc-radius: 14px;
+    --sc-shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 10px 26px -14px rgba(16, 24, 40, .22);
+    --sc-shadow-lg: 0 2px 4px rgba(16, 24, 40, .05), 0 20px 44px -20px rgba(23, 51, 99, .30);
+}
+
+/* ---------------------------------------------------------------- 页面骨架 */
+[data-testid="stAppViewContainer"],
+.stApp {
+    background: radial-gradient(1200px 620px at 12% -8%, #e8f0ff 0%, rgba(232, 240, 255, 0) 60%),
+                var(--sc-bg);
+    color: var(--sc-text);
+    font-feature-settings: "tnum" 1;
+}
+
+[data-testid="stHeader"] {
+    background: transparent;
+    height: 3.1rem;
+}
+
+[data-testid="stMainBlockContainer"],
+.appview-container .main {
+    padding-top: 1.6rem;
+    padding-bottom: 3.5rem;
+    max-width: 1680px;
+}
+
+/* 隐藏与产品无关的框架噪声 */
+#MainMenu,
+footer,
+[data-testid="stDecoration"],
+[data-testid="stStatusWidget"],
+[data-testid="stToolbarActions"] {
+    display: none !important;
+}
+
+/* ---------------------------------------------------------------- 侧边栏 */
+[data-testid="stSidebar"] {
+    background: var(--sc-surface);
+    border-right: 1px solid var(--sc-border);
+}
+
+[data-testid="stSidebar"] .stSidebar-header,
+[data-testid="stSidebarHeader"] {
+    padding-bottom: .25rem;
+}
+
+[data-testid="stSidebar"] hr,
+[data-testid="stSidebar"] .stDivider {
+    margin: 1.05rem 0 .55rem;
+    border-color: var(--sc-border);
+}
+
+[data-testid="stSidebarLabel"],
+[data-testid="stSidebar"] label p,
+[data-testid="stWidgetLabel"] label p {
+    font-size: .8rem;
+    font-weight: 650;
+    letter-spacing: .01em;
+    color: #334155;
+}
+
+[data-testid="stSidebar"] .stCaption,
+small[data-testid="stCaptionContainer"] {
+    color: var(--sc-muted);
+    font-size: .76rem;
+}
+
+/* ---------------------------------------------------------------- 卡片 */
+.sc-card {
+    background: var(--sc-surface);
+    border: 1px solid var(--sc-border);
+    border-radius: var(--sc-radius);
+    box-shadow: var(--sc-shadow);
+    padding: 1rem 1.15rem 1.05rem;
+    margin-bottom: 1rem;
+}
+
+.sc-card--flush { padding-top: .75rem; }
+
+.sc-eyebrow {
+    font-size: .7rem;
+    font-weight: 700;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    color: var(--sc-primary);
+    margin: 0 0 .35rem;
+}
+
+.sc-title {
+    font-size: 1.62rem;
+    font-weight: 780;
+    letter-spacing: -.02em;
+    line-height: 1.2;
+    margin: 0;
+}
+
+.sc-sub {
+    color: var(--sc-muted);
+    font-size: .87rem;
+    line-height: 1.6;
+    margin: .4rem 0 0;
+}
+
+.sc-section-title {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    font-size: .95rem;
+    font-weight: 700;
+    margin: 0 0 .7rem;
+}
+
+.sc-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--sc-cyan), var(--sc-primary));
+    box-shadow: 0 0 0 3px var(--sc-primary-soft);
+    flex: none;
+}
+
+/* ---------------------------------------------------------------- 指标条 */
+[data-testid="stMetric"] {
+    background: var(--sc-surface);
+    border: 1px solid var(--sc-border);
+    border-radius: 12px;
+    box-shadow: var(--sc-shadow);
+    padding: .72rem .9rem;
+}
+
+[data-testid="stMetricLabel"],
+[data-testid="stMetricLabel"] p {
+    font-size: .74rem !important;
+    font-weight: 600;
+    color: var(--sc-muted) !important;
+}
+
+[data-testid="stMetricValue"],
+[data-testid="stMetricValue"] > div {
+    font-size: 1.35rem !important;
+    font-weight: 750 !important;
+    letter-spacing: -.015em;
+    color: var(--sc-text) !important;
+}
+
+/* ---------------------------------------------------------------- AI 面板 */
+.sc-ai {
+    position: relative;
+    background: linear-gradient(180deg, #fbfdff 0%, var(--sc-surface) 42%);
+    border: 1px solid #dbe6fa;
+    border-radius: 16px;
+    box-shadow: var(--sc-shadow-lg);
+    padding: 1rem 1.1rem 1.05rem;
+    overflow: hidden;
+}
+
+.sc-ai::before {
+    content: "";
+    position: absolute; inset: 0 0 auto 0; height: 3px;
+    background: linear-gradient(90deg, #06b6d4 0%, #2563eb 45%, #7c3aed 100%);
+}
+
+.sc-ai-head {
+    display: flex; align-items: center; gap: .55rem;
+    margin-bottom: .8rem;
+}
+
+.sc-avatar {
+    width: 34px; height: 34px; border-radius: 10px; flex: none;
+    display: grid; place-items: center;
+    background: linear-gradient(135deg, var(--sc-primary) 0%, #4f46e5 100%);
+    color: #fff; font-size: .82rem; font-weight: 800; letter-spacing: .02em;
+    box-shadow: 0 6px 16px -6px rgba(37, 99, 235, .65);
+}
+
+.sc-ai-name { font-size: .95rem; font-weight: 720; line-height: 1.15; }
+.sc-ai-meta { font-size: .72rem; color: var(--sc-muted); margin-top: 2px; }
+
+.sc-type {
+    font-size: 1.34rem;
+    font-weight: 780;
+    letter-spacing: -.02em;
+    line-height: 1.28;
+    margin: .1rem 0 .55rem;
+    color: #0b2447;
+}
+
+.sc-type--refuse { color: var(--sc-bad); }
+
+.sc-reason {
+    font-size: .87rem;
+    line-height: 1.72;
+    color: #1e293b;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* 打字机是一段独立 iframe（浏览器不允许外部页面穿进 iframe 内部样式），
+   所以卡片外壳只能套在它外面这一层。 */
+[data-testid="stIFrame"], .stIFrame {
+    background: var(--sc-surface);
+    border: 1px solid var(--sc-border);
+    border-radius: var(--sc-radius);
+    box-shadow: var(--sc-shadow);
+    margin-bottom: 1rem;
+}
+
+.sc-caret {
+    display: inline-block;
+    width: 7px; height: 1.05em;
+    margin-left: 2px;
+    vertical-align: -2px;
+    background: var(--sc-primary);
+    animation: sc-blink .9s steps(2, start) infinite;
+}
+
+@keyframes sc-blink { to { visibility: hidden; } }
+
+/* ---------------------------------------------------------------- 标签 / 徽章 */
+.sc-chip {
+    display: inline-block;
+    padding: .17rem .55rem;
+    margin: 0 .3rem .35rem 0;
+    border-radius: 999px;
+    font-size: .74rem;
+    font-weight: 620;
+    border: 1px solid var(--sc-border);
+    background: #f8fafc;
+    color: #334155;
+    white-space: nowrap;
+}
+
+.sc-chip--gene { font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.sc-chip--blue { background: var(--sc-primary-soft); border-color: #cfe0fb; color: var(--sc-primary-dark); }
+.sc-chip--ok { background: #ecfdf3; border-color: #cdefd9; color: var(--sc-ok); }
+.sc-chip--warn { background: #fffbeb; border-color: #fde9b8; color: var(--sc-warn); }
+.sc-chip--bad { background: #fff1f2; border-color: #ffd9de; color: var(--sc-bad); }
+.sc-chip--ghost { background: transparent; }
+
+.sc-badge {
+    display: inline-flex; align-items: center; gap: .35rem;
+    padding: .22rem .6rem;
+    border-radius: 8px;
+    font-size: .74rem;
+    font-weight: 700;
+    letter-spacing: .01em;
+}
+
+.sc-badge--high { background: #dcfce7; color: #15803d; }
+.sc-badge--mid  { background: #fef3c7; color: #92400e; }
+.sc-badge--low  { background: #fee2e2; color: #b91c1c; }
+.sc-badge--none { background: #f1f5f9; color: #475569; }
+
+.sc-note {
+    border-left: 3px solid var(--sc-warn);
+    background: #fffdf5;
+    padding: .55rem .75rem;
+    border-radius: 0 10px 10px 0;
+    font-size: .82rem;
+    line-height: 1.6;
+    color: #4a3b18;
+    margin: .55rem 0;
+}
+
+.sc-note--bad { border-left-color: var(--sc-bad); background: #fff5f6; color: #5f1c26; }
+.sc-note--info { border-left-color: var(--sc-primary); background: #f5f9ff; color: #1e3a5f; }
+
+/* ---------------------------------------------------------------- 按钮 */
+/* Streamlit 把 type 写在 button 的 kind 属性上（实测：kind="primary" / kind="secondary"）。
+   这里用 !important 统一圆角与字重，所以必须把 primary 单独排除，否则主按钮会被染成白底。 */
+[data-testid="stButton"] > button,
+[data-testid="stDownloadButton"] > button {
+    border-radius: 10px !important;
+    font-weight: 640 !important;
+    padding: .5rem 1rem !important;
+    border: 1px solid var(--sc-border) !important;
+    background: var(--sc-surface) !important;
+    color: #1e293b !important;
+    transition: box-shadow .18s ease, transform .18s ease, border-color .18s ease;
+}
+
+[data-testid="stButton"] > button[kind="primary"] {
+    background: var(--sc-primary) !important;
+    border-color: transparent !important;
+    color: #fff !important;
+    box-shadow: 0 10px 24px -14px rgba(37, 99, 235, .85) !important;
+}
+
+[data-testid="stButton"] > button:hover,
+[data-testid="stDownloadButton"] > button:hover {
+    border-color: #b9cfeb !important;
+    box-shadow: 0 6px 18px -10px rgba(23, 51, 99, .45) !important;
+    transform: translateY(-1px);
+}
+
+[data-testid="stButton"] > button[kind="primary"]:hover {
+    background: var(--sc-primary-dark) !important;
+    border-color: transparent !important;
+}
+
+[data-testid="stRadio"] label {
+    font-size: .84rem;
+}
+
+/* ---------------------------------------------------------------- 其它细节 */
+[data-testid="stTabs"] button {
+    font-weight: 620;
+    font-size: .86rem;
+}
+
+[data-testid="stExpander"] details {
+    border: 1px solid var(--sc-border);
+    border-radius: 12px;
+    background: var(--sc-surface);
+    box-shadow: var(--sc-shadow);
+}
+
+[data-testid="stExpander"] summary p {
+    font-size: .84rem;
+    font-weight: 650;
+    color: #334155;
+}
+
+[data-testid="stDataFrame"] {
+    border: 1px solid var(--sc-border);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.sc-kv {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+    gap: .5rem;
+    margin: .35rem 0 .1rem;
+}
+
+.sc-kv > div {
+    background: #f8fafc;
+    border: 1px solid var(--sc-border);
+    border-radius: 10px;
+    padding: .48rem .6rem;
+}
+
+.sc-kv dt { font-size: .7rem; color: var(--sc-muted); margin: 0 0 2px; }
+.sc-kv dd { font-size: .84rem; font-weight: 680; margin: 0; color: #1e293b; }
+
+.sc-scroll { overflow-x: auto; }
+
+/* ---------------------------------------------------------------- Agent 时间线 */
+.sc-timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    margin: 0.8rem 0;
+    padding: 0.75rem;
+    background: #f8fafc;
+    border: 1px solid var(--sc-border);
+    border-radius: 12px;
+}
+
+.sc-timeline-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    position: relative;
+}
+
+.sc-timeline-step:not(:last-child)::after {
+    content: "";
+    position: absolute;
+    left: 15px;
+    top: 32px;
+    bottom: -0.6rem;
+    width: 2px;
+    background: linear-gradient(180deg, var(--sc-primary) 0%, var(--sc-cyan) 100%);
+    opacity: 0.3;
+}
+
+.sc-timeline-dot {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--sc-primary) 0%, var(--sc-cyan) 100%);
+    display: grid;
+    place-items: center;
+    font-size: 0.9rem;
+    flex: none;
+    box-shadow: 0 2px 8px -2px rgba(37, 99, 235, 0.4);
+}
+
+.sc-timeline-content {
+    flex: 1;
+    background: var(--sc-surface);
+    border: 1px solid var(--sc-border);
+    border-radius: 10px;
+    padding: 0.5rem 0.7rem;
+}
+
+.sc-timeline-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--sc-text);
+    line-height: 1.4;
+}
+
+.sc-timeline-detail {
+    font-size: 0.75rem;
+    color: var(--sc-muted);
+    margin-top: 0.2rem;
+    line-height: 1.5;
+}
+
+/* 窄屏（笔记本 1366px 以内）把左右两栏压成一栏，避免图表被挤扁 */
+@media (max-width: 1100px) {
+    [data-testid="stColumn"] { min-width: 100% !important; }
+    .sc-type { font-size: 1.2rem; }
+}

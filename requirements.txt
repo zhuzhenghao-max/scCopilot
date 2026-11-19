@@ -1,0 +1,37 @@
+# scCopilot 依赖
+# 已在本机实测通过的组合（Python 3.12 / Windows）：
+#   scanpy 1.12.4 + anndata 0.13.4 + numpy 2.5.3 + pandas 3.0.6 + scipy 1.18.1
+# 装不上时可退回：pip install "scanpy==1.11.2" "anndata==0.10.9" "numpy<2.3" "pandas<3"
+# 注意：scanpy 1.12 的 leiden 默认后端仍是 leidenalg（官方计划切换），
+#       core/pipeline.py 已显式指定 flavor，不依赖默认值。
+
+# ---- 生信核心 ----
+scanpy>=1.11,<1.13
+anndata>=0.10,<0.14
+numpy>=1.26
+pandas>=2.2
+scipy>=1.13
+scikit-learn>=1.4
+numba>=0.60
+umap-learn>=0.5.6
+leidenalg>=0.10
+igraph>=0.11            # leiden 的快后端，pipeline 会自动优先使用
+h5py>=3.10
+
+# ---- 可选：更准的 marker 统计与倍体/双细胞质控 ----
+# statsmodels>=0.14
+# scrublet 已随 scanpy 提供，无需单独安装
+
+# ---- 前端 ----
+# 本机实测：streamlit 1.67.0 + plotly 7.1.0。
+# app/main.py 用到图表选中事件（on_select / selection_mode）与新的 width="stretch" 参数；
+# 若被迫使用更早的 streamlit（<1.44），把 width="stretch" 换回 use_container_width=True 即可。
+streamlit>=1.44
+plotly>=5.22
+
+# ---- AI 层（OpenAI 兼容 HTTP 调用，仅需 requests）----
+requests>=2.31
+# 若愿意用官方 SDK，可选装：openai>=1.40
+
+# ---- 开发 ----
+# pytest>=8.0
