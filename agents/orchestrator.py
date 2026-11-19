@@ -188,8 +188,13 @@ class AnnotatorAgent(BaseAgent):
             # 本地知识库投票吃的是**基因符号**，不是 KG 的细胞类型名。
             # 传 c["name"]（"T cell" 之类）会让 vote_cell_types 全部落空，
             # 结果每个簇都判成"证据不足"（实测踩过）。
-            itp = _local_interpretation(marker_genes, cluster_id,
-                                        note="本地知识库投票 + KG 检索交叉验证")
+            # note 得自己写明"没调用大模型"：这条分支就是纯本地推断，只写方法名，
+            # 没配 key 的用户会把卡片上的结论当成模型输出。
+            why = ("调用方未提供 llm" if llm is None
+                   else plan.get("reason", "规划阶段判定不走大模型"))
+            itp = _local_interpretation(
+                marker_genes, cluster_id,
+                note=f"未调用大模型（{why}）；结论由本地知识库投票 + KG 检索交叉验证。")
             # 闸门跑在 workflow 开头，_local_interpretation 自己不知道。不挂回去，
             # 前端「证据闸门」面板在纯本地模式下就是空的（实测踩过）。
             itp.gate = evidence.as_dict()
