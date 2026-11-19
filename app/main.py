@@ -32,6 +32,7 @@ import html as _html
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -50,6 +51,7 @@ import plotly.graph_objects as go             # noqa: E402
 import streamlit as st                        # noqa: E402
 
 from ai import explainer as ai                # noqa: E402
+from core import audit_report                 # noqa: E402
 from core import pipeline                     # noqa: E402
 from agents import orchestrator               # noqa: E402
 
@@ -231,6 +233,33 @@ def stage_upload(name: str, size: int, blob: bytes) -> tuple[str, str]:
     if not target.exists():
         target.write_bytes(blob)
     return str(target), f"upload:{stem}:{digest}:{size}"
+
+
+@st.cache_data(show_spinner=False)
+def data_fingerprint(path: str, mtime: float, size: int) -> str:
+    """输入数据的 sha256。mtime/size 进缓存键：文件换了就重算，不会拿旧指纹冒充新数据。"""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+@st.cache_data(show_spinner=False)
+def code_commit() -> str:
+    try:
+        r = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=str(ROOT),
+                           capture_output=True, text=True, timeout=10)
+        return r.stdout.strip() if r.returncode == 0 else "未记录（非 git 环境）"
+    except (OSError, subprocess.SubprocessError):
+        return "未记录（无 git）"
+
+
+def audit_bundle_data(result: Any, workflows: dict[str, Any], meta: dict[str, Any]):
+    """存证包下载按钮的零参回调。入参是渲染期快照：回调线程里读不到 session_state。"""
+    def _bytes() -> bytes:
+        return audit_report.build_audit_html(result, workflows, meta).encode("utf-8")
+    return _bytes
 
 
 def sidebar_controls() -> dict[str, Any]:
@@ -984,6 +1013,24 @@ def render_run_info(result: pipeline.PipelineResult, p: dict[str, Any]) -> None:
         d2.download_button("簇表 CSV", result.clusters.to_csv(index=False).encode("utf-8-sig"),
                            file_name="scCopilot_clusters.csv", width="stretch")
 
+        # data 传 callable 时 Streamlit 在独立线程里执行它，里面的 st.* 命令（含
+        # session_state 读取）会被忽略——实测页面有结论、导出的存证包却整片「本簇未解读」。
+        # 所以入参必须是渲染期的快照，见 audit_bundle_data。
+        stt = Path(p["path"]).stat()
+        audit_meta = {
+            "data_source": p.get("src_id") or p.get("path", ""),
+            "data_sha256": data_fingerprint(p["path"], stt.st_mtime, stt.st_size),
+            "code_commit": code_commit(),
+        }
+        st.download_button(
+            "导出存证包（单文件 HTML，可离线核对）",
+            audit_bundle_data(result, dict(st.session_state.get("ai_cache", {})), audit_meta),
+            file_name="scCopilot_audit_"
+                      + fingerprint(p, ("src_id", "resolution", "n_markers")) + ".html",
+            mime="text/html", width="stretch",
+            help="输入 sha256、全部参数、逐簇证据表、prompt 与模型回复原文、obs 写回分布，"
+                 "都在一个自包含文件里；三个月后别人不装 Python 也能核对。")
+
         cache = st.session_state.get("ai_cache", {})
         if cache:
             md = ["# scCopilot 解读报告", ""]
@@ -1161,9 +1208,12 @@ def render_ai_card_with_trace(cluster: str, result: pipeline.PipelineResult, p: 
 
     refused = itp.refused or itp.predicted_type == ai.REFUSAL
     meta = (("本地缓存命中 · 首次请求 " + itp.cached_at) if itp.cache_hit else
-            (f"{itp.latency_s}s" if itp.latency_s else "0 次网络请求")) + (
-        f" ｜ prompt {itp.prompt_chars} 字符" if itp.prompt_chars else ""
-    )
+            (f"{itp.latency_s}s" if itp.latency_s else "0 次网络请求"))
+    if itp.prompt_chars:
+        # 字符数不等于"发出去了"：本地兜底与缓存命中都没有产生新的 API 调用。
+        state = ("已发送" if itp.source == "llm" and not itp.cache_hit else
+                 "缓存复用，未重新发送" if itp.cache_hit else "构造未发送")
+        meta += f" ｜ prompt {itp.prompt_chars} 字符（{state}）"
     het = workflow.get("heterogeneity")
     parts = [
         head,

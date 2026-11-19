@@ -35,7 +35,7 @@ def test_planner_does_not_claim_llm_when_none_configured():
 
     plan = planner.plan("0", genes, evidence, llm_available=False)
     assert plan["use_llm"] is False
-    assert "未配置大模型" in plan["reason"], plan
+    assert "不调用大模型" in plan["reason"], plan
     assert "调用 LLM +" not in plan["reason"], plan
 
     # 整条工作流离线跑时，Planner 的文案必须和实际执行路径一致

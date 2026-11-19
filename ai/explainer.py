@@ -364,6 +364,7 @@ class Interpretation:
     model: str = ""
     latency_s: float = 0.0
     prompt_chars: int = 0
+    prompt: str = ""                   # 本次构造的 prompt 原文；source 非 llm 时它并未被发送
     raw: str = ""
     cache_hit: bool = False                # True = 本次结论取自本地缓存，没有真的打网关
     cached_at: str = ""                    # 首次请求落盘时间
@@ -707,6 +708,28 @@ def _local_interpretation(informative: list[str], cluster: str, note: str) -> In
     )
 
 
+def construct_cluster_prompt(
+    rows: Sequence[dict[str, Any]],
+    *,
+    cluster: str,
+    cluster_stats: dict[str, Any] | None = None,
+    prior_genes: Sequence[str] | None = None,
+) -> str:
+    """构造 prompt 的唯一入口：LLM 分支与本地兜底共用，存证包里的原文才可比。
+
+    非法基因名不进 prompt（闸门②）。prior_genes 不传时用 rows 里的全部基因名。
+    """
+    safe = [r for r in rows if gene_kb.is_valid_symbol(str(r.get("gene", "")))]
+    genes = [str(r["gene"]) for r in safe]
+    prior = gene_kb.vote_cell_types(
+        list(prior_genes) if prior_genes is not None else genes, top=3)
+    return build_cluster_prompt(
+        cluster=cluster or "?", rows=safe, cluster_stats=cluster_stats,
+        species_hint="mouse" if gene_kb.looks_mouse(genes) else "human",
+        local_prior=prior,
+    )
+
+
 def interpret_cluster(
     marker_genes_list: Sequence[Any],
     evidence: Any = None,
@@ -754,11 +777,9 @@ def interpret_cluster(
         )
 
     genes_for_prompt = [r["gene"] for r in safe_rows]      # 闸门②：非法名不进 prompt
-    prior = gene_kb.vote_cell_types(gate.informative + gate.unknown, top=3)
-    species = "mouse" if gene_kb.looks_mouse(genes_for_prompt) else "human"
-    prompt = build_cluster_prompt(
-        cluster=cluster or "?", rows=safe_rows, cluster_stats=cluster_stats,
-        species_hint=species, local_prior=prior,
+    prompt = construct_cluster_prompt(
+        safe_rows, cluster=cluster, cluster_stats=cluster_stats,
+        prior_genes=gate.informative + gate.unknown,
     )
 
     # ---- 无 Key / 显式关闭：本地兜底 ----
@@ -769,6 +790,7 @@ def interpret_cluster(
         itp = _local_interpretation(gate.informative, cluster,
                                     note=f"未调用大模型（{why}），以下结果由本地规则推断。")
         itp.gate, itp.prompt_chars = gate.as_dict(), len(prompt)
+        itp.prompt = prompt
         return itp
 
     t0 = time.perf_counter()
@@ -778,6 +800,7 @@ def interpret_cluster(
         itp = _local_interpretation(gate.informative, cluster,
                                     note=f"大模型调用失败（{err}），已自动退回本地规则推断。")
         itp.gate, itp.latency_s, itp.model = gate.as_dict(), latency, cfg.model
+        itp.prompt = prompt
         return itp
 
     # ---- 解析三段 ----
@@ -793,7 +816,7 @@ def interpret_cluster(
             reasoning="模型未按约定三段格式输出，为避免误读不予采信。原始回复如下，请人工判读：\n"
                       + content[:400],
             refused=True, source="llm", gate=gate.as_dict(), model=cfg.model,
-            latency_s=latency, raw=content, violations=["输出格式不符合三段式约定"],
+            latency_s=latency, prompt=prompt, raw=content, violations=["输出格式不符合三段式约定"],
             cache_hit=bool(meta.get("cache_hit")), cached_at=str(meta.get("cached_at", "")),
         )
 
@@ -803,7 +826,7 @@ def interpret_cluster(
             cluster=cluster, predicted_type=REFUSAL, confidence_label="—", confidence_score=None,
             reasoning=reasoning or "模型判定现有 marker 不足以确定细胞类型。",
             refused=True, source="llm", gate=gate.as_dict(), model=cfg.model,
-            latency_s=latency, raw=content,
+            latency_s=latency, prompt=prompt, raw=content,
             cache_hit=bool(meta.get("cache_hit")), cached_at=str(meta.get("cached_at", "")),
         )
 
@@ -868,7 +891,7 @@ def interpret_cluster(
         confidence_label=conf_label, confidence_score=conf_score,
         reasoning=reasoning, refused=False, source="llm", gate=gate.as_dict(),
         cited_genes=cited, fabricated_genes=fabricated, violations=violations,
-        model=cfg.model, latency_s=latency, prompt_chars=len(prompt), raw=content,
+        model=cfg.model, latency_s=latency, prompt_chars=len(prompt), prompt=prompt, raw=content,
         cache_hit=bool(meta.get("cache_hit")), cached_at=str(meta.get("cached_at", "")),
         notes=extra_notes,
     )

@@ -111,7 +111,7 @@ class PlannerAgent(BaseAgent):
         enough_markers = len(marker_genes) >= 3
         use_llm = evidence.ok and enough_markers and llm_available
         if evidence.ok and enough_markers and not llm_available:
-            reason = "证据充足，但未配置大模型 → 本地知识库投票 + KG 检索"
+            reason = "证据充足，但本次不调用大模型（未配 Key 或开关已关）→ 本地知识库投票 + KG 检索"
         elif use_llm:
             reason = "证据充足，调用 LLM + KG 检索"
         else:
@@ -198,6 +198,14 @@ class AnnotatorAgent(BaseAgent):
             # 闸门跑在 workflow 开头，_local_interpretation 自己不知道。不挂回去，
             # 前端「证据闸门」面板在纯本地模式下就是空的（实测踩过）。
             itp.gate = evidence.as_dict()
+            # 存证包要能回答「当时喂给模型的输入长什么样」。本地分支没发请求，但按同一套
+            # 规则构造的 prompt 仍然留档，并在报告里明确标注"未发送"。
+            itp.prompt = ai_explainer.construct_cluster_prompt(
+                evidence_rows or [{"gene": g} for g in marker_genes],
+                cluster=cluster_id, cluster_stats=cluster_stats,
+                prior_genes=evidence.informative + evidence.unknown,
+            )
+            itp.prompt_chars = len(itp.prompt)
             if itp.refused:
                 # 拒答理由要落到真实数字：闸门为什么判证据不足、KG 有没有候选。
                 details = list(evidence.reasons)

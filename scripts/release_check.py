@@ -175,7 +175,7 @@ def check_reexport() -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--skip-tests", action="store_true", help="只查发布物，不跑 152 用例")
+    ap.add_argument("--skip-tests", action="store_true", help="只查发布物，不跑全量用例")
     ap.add_argument("--reexport", action="store_true", help="重跑导出，验证 web/data 可复现")
     args = ap.parse_args()
 
