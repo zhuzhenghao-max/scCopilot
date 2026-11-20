@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -368,6 +369,88 @@ def test_app_renders_and_reclusters_headless():
         at.run()
         assert not at.exception, [e.value for e in at.exception]
         assert other not in at.session_state["ai_cache"], "关掉自动解读后仍调用了模型"
+
+
+def test_review_panel_records_decisions_headless():
+    """人工复核整链路：表单 → append-only jsonl → obs 终稿列 → 导出区口径。
+
+    钉住两条口径：终稿绝不覆盖 AI 首稿（否则改动率无法复算），第二次决定只追加一行、
+    历史不消失。日志写进 SCCOPILOT_REVIEW_DIR 指向的隔离目录，不污染 data/reviews。
+    """
+    import tempfile
+
+    tmp = Path(tempfile.mkdtemp(prefix="sccopilot_reviews_"))
+    os.environ["SCCOPILOT_REVIEW_DIR"] = str(tmp)
+    try:
+        from streamlit.testing.v1 import AppTest
+
+        at = AppTest.from_file(str(ROOT / "app" / "main.py"), default_timeout=900)
+        at.run()
+        assert not at.exception, [e.value for e in at.exception]
+
+        res = at.session_state["result"]
+        cid = str(res.clusters["cluster"].iloc[0])
+        ckey = res.cluster_key
+        wf = at.session_state["ai_cache"][cid]
+        itp = wf["interpretation"]
+        blocked = bool(itp.refused) or (wf.get("critique") or {}).get("status") == "escalate"
+        want_label = "low_confidence" if blocked else str(itp.predicted_type)
+        draft = str(res.adata.obs.loc[res.adata.obs[ckey].astype(str) == cid,
+                                      "sccopilot_type"].iloc[0])
+        # 首稿落回必须已经跟上本轮的 AI 结论：曾经踩过 annotate 早于卡片执行，
+        # 于是第一次复核把 ai_label 记成 unannotated。
+        assert draft == want_label, (draft, want_label)
+        assert draft != "unannotated", "annotate 没跟上本轮解读，复核记录会写错首稿"
+        assert "人工复核" in " ".join(str(m.value) for m in at.markdown), "复核面板没渲染"
+
+        at.radio(key=f"review_action_{cid}").set_value("edit")
+        at.text_input(key=f"review_type_{cid}").set_value("NK 细胞")
+        at.text_input(key=f"review_note_{cid}").set_value("CD3D 阴性，改判 NK")
+        at.text_input(key=f"review_reviewer_{cid}").set_value("测试员")
+        at.form_submit_button(key=f"review_save_{cid}").click().run()
+        assert not at.exception, [e.value for e in at.exception]
+
+        res2 = at.session_state["result"]
+        sub = res2.adata.obs[res2.adata.obs[ckey].astype(str) == cid]
+        assert set(sub["sccopilot_review"]) == {"edit"}, set(sub["sccopilot_review"])
+        assert set(sub["sccopilot_final_type"]) == {"NK 细胞"}
+        assert set(sub["sccopilot_type"]) == {draft}, "终稿不许覆盖 AI 首稿"
+        assert "sccopilot_final_type" in res2.clusters.columns
+
+        logs = list(tmp.glob("*.jsonl"))
+        assert len(logs) == 1, logs
+        rows = app.review.read_decisions(logs[0])
+        assert len(rows) == 1 and rows[0]["final_type"] == "NK 细胞"
+        assert rows[0]["ai_label"] == draft and rows[0]["note"] == "CD3D 阴性，改判 NK"
+        assert rows[0]["run_id"], "决定要绑定运行指纹，换分辨率后不能沿用旧终稿"
+
+        md_all = " ".join(str(m.value) for m in at.markdown)
+        caps = " ".join(str(c.value) for c in at.get("caption"))
+        assert "人工复核落回" in md_all, "导出区没说清终稿落到哪几列"
+        assert "AI 首稿人工改动率" in caps, "改动率口径走 caption，别去 markdown 里找"
+
+        # 同一簇再判一次「拒绝」：日志追加成两行，生效决定换成 human_rejected
+        at.radio(key=f"review_action_{cid}").set_value("reject")
+        at.form_submit_button(key=f"review_save_{cid}").click().run()
+        assert not at.exception, [e.value for e in at.exception]
+        rows = app.review.read_decisions(logs[0])
+        assert [r["action"] for r in rows] == ["edit", "reject"], "append-only 被破坏了"
+        sub2 = at.session_state["result"].adata.obs
+        sub2 = sub2[sub2[ckey].astype(str) == cid]
+        assert set(sub2["sccopilot_final_type"]) == {"human_rejected"}
+        caps = " ".join(str(c.value) for c in at.get("caption"))
+        assert "决定历史 2 条" in caps, caps[:300]
+
+        # 空终稿不许入库：选了「修改类型」却没填名字，页面报错、日志仍只有两行
+        at.radio(key=f"review_action_{cid}").set_value("edit")
+        at.text_input(key=f"review_type_{cid}").set_value("")
+        at.form_submit_button(key=f"review_save_{cid}").click().run()
+        assert not at.exception, [e.value for e in at.exception]
+        assert len(app.review.read_decisions(logs[0])) == 2, "留空的修改不该写进日志"
+        assert any("必须给出最终细胞类型" in str(e.value) for e in at.error), [e.value for e in at.error]
+    finally:
+        os.environ.pop("SCCOPILOT_REVIEW_DIR", None)
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def test_app_survives_switching_to_missing_source():

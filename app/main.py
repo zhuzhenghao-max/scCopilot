@@ -53,6 +53,7 @@ import streamlit as st                        # noqa: E402
 from ai import explainer as ai                # noqa: E402
 from core import audit_report                 # noqa: E402
 from core import pipeline                     # noqa: E402
+from core import review                       # noqa: E402
 from agents import orchestrator               # noqa: E402
 
 # streamlit-plotly-events 是可选依赖：装了用它的细粒度点击事件，没装退回 Streamlit 原生 on_select
@@ -64,6 +65,8 @@ except ImportError:
 
 DATA_DIR = ROOT / "data"
 UPLOAD_DIR = DATA_DIR / "uploads"
+# 复核日志目录可以整体挪走：无头测试要往隔离目录写，换台机器接着复核也要指回旧日志。
+REVIEW_DIR = Path(os.environ.get("SCCOPILOT_REVIEW_DIR") or (DATA_DIR / "reviews"))
 DEMO_H5AD = DATA_DIR / "raw" / "demo_pbmc_sim.h5ad"
 
 # 科技蓝主色，与 style.css 的 --sc-primary 对应；簇配色循环取用
@@ -255,11 +258,103 @@ def code_commit() -> str:
         return "未记录（无 git）"
 
 
-def audit_bundle_data(result: Any, workflows: dict[str, Any], meta: dict[str, Any]):
+def audit_bundle_data(result: Any, workflows: dict[str, Any], meta: dict[str, Any],
+                      reviews: list[dict[str, Any]] | None = None):
     """存证包下载按钮的零参回调。入参是渲染期快照：回调线程里读不到 session_state。"""
     def _bytes() -> bytes:
-        return audit_report.build_audit_html(result, workflows, meta).encode("utf-8")
+        return audit_report.build_audit_html(result, workflows, meta,
+                                             reviews=reviews).encode("utf-8")
     return _bytes
+
+
+def review_run_id(p: dict[str, Any]) -> str:
+    """复核日志按运行指纹分文件：换了分辨率，簇号的含义就变了，旧决定不能悄悄沿用。"""
+    return fingerprint(p, ("src_id", "resolution", "n_markers"))
+
+
+def review_log_path(p: dict[str, Any]) -> Path:
+    return REVIEW_DIR / (review_run_id(p) + ".jsonl")
+
+
+def first_draft_label(result: pipeline.PipelineResult, cluster: str, itp: Any) -> str:
+    """首稿落到 obs 的那个值（拒答簇是 low_confidence），不是页面上展示的那句话。"""
+    row = result.clusters[result.clusters["cluster"].astype(str) == str(cluster)]
+    if len(row) and "sccopilot_type" in row.columns:
+        return str(row.iloc[0]["sccopilot_type"])
+    return str(itp.predicted_type)
+
+
+def review_panel(cluster: str, result: pipeline.PipelineResult, p: dict[str, Any],
+                 itp: Any) -> None:
+    """人工复核：采纳 / 修改 / 拒绝 → append-only jsonl + obs 终稿列。"""
+    path = review_log_path(p)
+    log = review.read_decisions(path)
+    latest = review.latest_by_cluster(log)
+    mine = latest.get(str(cluster))
+    stats = review.review_stats(log, result.clusters["cluster"].astype(str).tolist())
+
+    st.markdown("#### 人工复核")
+    flash = st.session_state.pop("review_flash", None)
+    if flash:
+        st.success(flash)
+    if mine:
+        action = str(mine.get("action", ""))
+        st.markdown(
+            chip(review.ACTION_LABELS.get(action, action),
+                 "bad" if action == "reject" else "ok")
+            + chip(f"终稿 {mine.get('final_type') or '—'}", "blue")
+            + chip(f"{mine.get('ts', '')}", "ghost"),
+            unsafe_allow_html=True,
+        )
+        if mine.get("note"):
+            st.caption(f"备注：{mine['note']}")
+    else:
+        st.caption("本簇尚未复核：`sccopilot_final_type` 留空，不会把 AI 首稿当成人工定稿。")
+    if stats["n_reviewed"]:
+        st.caption(
+            f"已复核 {stats['n_reviewed']}/{stats['n_clusters']} 簇"
+            f"（覆盖率 {stats['coverage']:.0%}）｜ AI 首稿人工改动率 "
+            f"{stats['change_rate']:.1%}（{stats['n_changed']}/{stats['n_reviewed']}，"
+            "分母＝已复核簇数）｜ 决定历史 "
+            f"{stats['n_decisions']} 条（append-only，同簇后写生效）")
+    else:
+        st.caption(f"全部 {stats['n_clusters']} 个簇都还没复核，改动率暂无从谈起（不显示假数字）。")
+
+    ai_label = first_draft_label(result, cluster, itp)
+    actions = list(review.REVIEW_ACTIONS)
+    with st.form(key=f"review_form_{cluster}"):
+        action = st.radio(
+            "复核决定", actions, horizontal=True, key=f"review_action_{cluster}",
+            index=actions.index(str(mine.get("action"))) if mine else 0,
+            format_func=lambda a: review.ACTION_LABELS[a],
+            help="采纳＝终稿用 AI 首稿；修改＝人工给一个新类型；拒绝＝人工否决且不给类型"
+                 "（终稿写 human_rejected）。三种都会追加一行日志，历史不覆盖。")
+        final = st.text_input(
+            "最终细胞类型（选「修改类型」时必填）", key=f"review_type_{cluster}",
+            value=str(mine.get("final_type", "")) if mine and mine.get("action") == "edit"
+                  else ai_label)
+        note = st.text_input("备注（会原样进存证包）", key=f"review_note_{cluster}",
+                             value=str(mine.get("note", "")) if mine else "")
+        reviewer = st.text_input("复核人（可留空）", key=f"review_reviewer_{cluster}",
+                                 value=str(mine.get("reviewer", "")) if mine else "")
+        submitted = st.form_submit_button("记录复核决定", type="primary", width="stretch",
+                                          key=f"review_save_{cluster}")
+
+    if not submitted:
+        return
+    if action == "edit" and not final.strip():
+        st.error("选了「修改类型」就必须给出最终细胞类型，不能留空。")
+        return
+    decision = review.Decision(
+        cluster=str(cluster), ai_type=str(itp.predicted_type), ai_label=ai_label,
+        action=action, final_type=final, note=note.strip(), reviewer=reviewer.strip(),
+        source=str(itp.source), confidence=itp.confidence_score, run_id=review_run_id(p))
+    review.append_decision(path, decision)
+    review.apply_reviews(result, review.read_decisions(path))
+    st.session_state["review_flash"] = (
+        f"已记录簇 {cluster} 的复核：{review.ACTION_LABELS[action]} → "
+        f"{decision.final_type}（日志 {path.name} 追加一行，AI 首稿列未改动）")
+    st.rerun()
 
 
 def sidebar_controls() -> dict[str, Any]:
@@ -1013,6 +1108,30 @@ def render_run_info(result: pipeline.PipelineResult, p: dict[str, Any]) -> None:
         d2.download_button("簇表 CSV", result.clusters.to_csv(index=False).encode("utf-8-sig"),
                            file_name="scCopilot_clusters.csv", width="stretch")
 
+        # 复核记录：磁盘上的 append-only 日志才是事实，页面状态只是它的视图
+        rev_log = review.read_decisions(review_log_path(p))
+        rev = review.apply_reviews(result, rev_log)
+        st.markdown("#### 人工复核落回")
+        if rev["n_reviewed"]:
+            st.caption(
+                f"`obs` 新增列：`sccopilot_review`（accept/edit/reject/unreviewed）、"
+                f"`sccopilot_final_type`（人工定稿，未复核留空）。AI 首稿仍在 `sccopilot_type`，"
+                f"两列逐细胞可直接对比。已复核 {rev['n_reviewed']}/{rev['n_clusters']} 簇"
+                f"（覆盖率 {rev['coverage']:.0%}），AI 首稿人工改动率 {rev['change_rate']:.1%}"
+                f"（{rev['n_changed']}/{rev['n_reviewed']}，分母＝已复核簇数）；"
+                f"决定历史 {rev['n_decisions']} 条。日志文件："
+                f"`data/reviews/{review_run_id(p)}.jsonl`。")
+        else:
+            st.caption("`obs` 的 `sccopilot_review` / `sccopilot_final_type` 两列全为 "
+                       "unreviewed / 空：本次运行还没有人工复核记录，改动率不给数字。")
+
+        st.download_button("复核记录 JSONL（append-only 决策日志）",
+                           review.to_jsonl_bytes(rev_log),
+                           file_name=f"scCopilot_reviews_{review_run_id(p)}.jsonl",
+                           mime="application/json", width="stretch",
+                           help="一行一个决定，含 AI 首稿、终稿、备注、复核人与时间；"
+                                "同一簇后写的决定生效，历史行永不改写。")
+
         # data 传 callable 时 Streamlit 在独立线程里执行它，里面的 st.* 命令（含
         # session_state 读取）会被忽略——实测页面有结论、导出的存证包却整片「本簇未解读」。
         # 所以入参必须是渲染期的快照，见 audit_bundle_data。
@@ -1024,7 +1143,8 @@ def render_run_info(result: pipeline.PipelineResult, p: dict[str, Any]) -> None:
         }
         st.download_button(
             "导出存证包（单文件 HTML，可离线核对）",
-            audit_bundle_data(result, dict(st.session_state.get("ai_cache", {})), audit_meta),
+            audit_bundle_data(result, dict(st.session_state.get("ai_cache", {})),
+                              audit_meta, rev_log),
             file_name="scCopilot_audit_"
                       + fingerprint(p, ("src_id", "resolution", "n_markers")) + ".html",
             mime="text/html", width="stretch",
@@ -1236,6 +1356,12 @@ def render_ai_card_with_trace(cluster: str, result: pipeline.PipelineResult, p: 
         parts.append(f'<div class="sc-note">说明：{_html.escape(n)}</div>')
     card("".join(parts), cls="sc-ai")
 
+    # 首稿这一步才刚写进缓存，而 obs/簇表是本轮渲染开头 annotate 的——不先刷一次，
+    # 第一次复核就会把 ai_label 记成 unannotated（实测截图里预填的就是它）。
+    result.annotate(annotation_rows(cache))
+    # 复核紧跟首稿：判型结论和「人认不认」放在一起，不用滚到页面底再回来看
+    review_panel(cluster, result, p, itp)
+
     # Agent 思考过程时间线
     # 注意：拼给 unsafe_allow_html 的 HTML 必须顶格。Markdown 会把行首 4 个以上空格
     # 当成缩进代码块，整段 HTML 会原样显示成文本（实测踩过）。
@@ -1310,6 +1436,8 @@ def main() -> None:
     # 注释落回在渲染前统一做一次：左栏簇一览、右栏导出读到的是同一份 obs/簇表，
     # 不看渲染顺序脸色（缓存恢复、清 ai_cache 之后旧标签也会被重写回 unannotated）。
     result.annotate(annotation_rows(st.session_state.get("ai_cache", {})))
+    # 复核终稿在渲染前统一落回 obs/簇表：日志是磁盘上的事实，不依赖页面状态
+    review.apply_reviews(result, review.read_decisions(review_log_path(params)))
 
     df = cell_table(result)
     st.session_state["umap_cells"] = df          # 供点击回退查表使用
@@ -1405,8 +1533,10 @@ def main() -> None:
             "median_pct_mito": "中线粒体%", "median_counts": "中UMI",
             "evidence_ok": "证据充足", "suspect_low_quality": "疑似低质量",
             "sccopilot_type": "AI注释", "sccopilot_het": "异质性",
+            "sccopilot_review": "复核", "sccopilot_final_type": "人工定稿",
         })
-        keep = [c for c in ("簇", "AI注释", "细胞数", "占比%", "强证据", "中线粒体%", "中UMI",
+        keep = [c for c in ("簇", "AI注释", "复核", "人工定稿", "细胞数", "占比%", "强证据",
+                           "中线粒体%", "中UMI",
                            "未注释比例", "线粒体比例", "证据充足", "疑似低质量") if c in view]
         st.dataframe(
             view[keep], hide_index=True, width="stretch", height=min(400, 60 + 35 * len(view)),

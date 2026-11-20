@@ -167,6 +167,70 @@ def test_cache_hit_and_critic_are_shown():
     assert "Critic" in h and "critique" in h
 
 
+def test_review_section_reports_rate_with_reviewed_denominator():
+    from core import review
+    r = _result()
+    cids = [str(c) for c in r.clusters["cluster"]]
+    assert len(cids) >= 3
+    log = [
+        review.Decision(cluster=cids[0], ai_type="CD4+ T 细胞", ai_label="CD4+ T 细胞",
+                        action="accept", run_id="run_x").as_dict(),
+        review.Decision(cluster=cids[1], ai_type="B 细胞", ai_label="B 细胞",
+                        action="accept", run_id="run_x").as_dict(),
+        review.Decision(cluster=cids[1], ai_type="B 细胞", ai_label="B 细胞",
+                        action="edit", final_type="浆细胞", note="CD19+ 但浆细胞标记更强",
+                        reviewer="张某某", run_id="run_x").as_dict(),
+    ]
+    h = audit_report.build_audit_html(r, {}, _META, reviews=log)
+    assert "五、人工复核记录" in h and "六、如何核对" in h
+    assert "AI 首稿人工改动率" in h and "50.0%" in h, "1/2 已复核簇改了标签"
+    assert f"{2 / len(cids):.1%}" in h, "覆盖率分母是全部簇数"
+    assert "已复核簇数" in h and "日志条数（含历史）" in h
+    assert "浆细胞" in h and "张某某" in h and "CD19+ 但浆细胞标记更强" in h
+    assert "决策历史" in h, "被覆盖的 accept 行也要留在报告里"
+    assert "未复核簇（终稿留空）" in h and cids[2] in h
+    assert f"簇 {cids[1]}</h3>" in h and "（标签有改动）" in h
+    assert "（标签未变）" in h, "采纳首稿的簇要写明标签没变"
+
+
+def test_no_reviews_is_disclosed_not_faked():
+    from core import review
+    r = _result()
+    h = audit_report.build_audit_html(r, {}, _META)
+    assert "本次运行没有人工复核记录" in h
+    assert "100.0%" not in h, "没人复核时不能编一个改动率/覆盖率"
+    assert h.count("人工复核：<span class=\"tag\">未复核</span>") == len(r.clusters)
+    review.apply_reviews(r, [])
+    assert "unreviewed" in audit_report.build_audit_html(r, {}, _META)
+
+
+def test_review_text_is_escaped():
+    from core import review
+    r = _result()
+    cid = str(r.clusters["cluster"].iloc[0])
+    evil = '<script>alert("x")</script> & O\'Brien'
+    log = [review.Decision(cluster=cid, ai_type=evil, ai_label=evil, action="edit",
+                           final_type=evil, note=evil, reviewer=evil).as_dict()]
+    h = audit_report.build_audit_html(r, {}, _META, reviews=log)
+    assert "<script>" not in h and "&lt;script&gt;" in h
+    assert "&amp;" in h and "&#x27;" in h
+
+
+def test_review_obs_columns_show_up_in_writeback_table():
+    from core import review
+    r = _result()
+    cid = str(r.clusters["cluster"].iloc[0])
+    r.annotate({cid: {"type": "CD4+ T 细胞", "conf": 0.72, "source": "llm",
+                      "het": "homogeneous", "blocked": False}})
+    log = [review.Decision(cluster=cid, ai_type="CD4+ T 细胞", ai_label="CD4+ T 细胞",
+                           action="reject").as_dict()]
+    review.apply_reviews(r, log)
+    h = audit_report.build_audit_html(r, {cid: {"interpretation": _itp(cid)}}, _META, reviews=log)
+    assert "<td>sccopilot_review</td>" in h and "<td>sccopilot_final_type</td>" in h
+    assert f"<td>{review.REJECTED}</td>" in h
+    assert "<td>CD4+ T 细胞</td>" in h, "首稿列不能被终稿覆盖"
+
+
 def test_download_callable_survives_bare_context():
     """下载回调在独立线程执行、st.* 命令被忽略；测试进程没有 ScriptRunContext，正是那个裸上下文。
 
@@ -193,6 +257,23 @@ def test_deterministic_except_timestamp():
     c = audit_report.build_audit_html(r, wf, later)
     assert c != a
     assert c.replace("2026-11-20", "2026-11-19") == a
+
+
+def test_download_snapshot_carries_reviews():
+    """导出回调拿到的复核日志也必须是渲染期快照，页面上有的，存证包里就得有。"""
+    from app import main as app_main
+    from core import review
+    r = _result()
+    cid = str(r.clusters["cluster"].iloc[0])
+    wf = run_annotation_workflow(cid, r.genes_of(cid), llm=None)
+    log = [review.Decision(cluster=cid, ai_type=wf["interpretation"].predicted_type,
+                           ai_label=wf["interpretation"].predicted_type,
+                           action="edit", final_type="NK 细胞").as_dict()]
+    h = app_main.audit_bundle_data(r, {cid: wf}, _META, log)().decode("utf-8")
+    assert "五、人工复核记录" in h and "NK 细胞" in h
+    assert audit_report.PROMPT_STATE["local_kb"] in h
+    # 不传 reviews 时保持旧行为：报告如实说没人复核
+    assert "本次运行没有人工复核记录" in app_main.audit_bundle_data(r, {cid: wf}, _META)().decode("utf-8")
 
 
 # --------------------------------------------------------------------------- #

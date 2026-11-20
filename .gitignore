@@ -9,6 +9,8 @@ data/raw/*.csv
 data/uploads/*
 data/processed/
 data/cache/
+# 人工复核日志：用户对自家数据的判型决定，属于本机工作产物，不入库
+data/reviews/
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/cache/.gitkeep
